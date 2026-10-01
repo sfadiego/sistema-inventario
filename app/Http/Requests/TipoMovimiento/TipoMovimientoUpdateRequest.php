@@ -3,6 +3,7 @@
 namespace App\Http\Requests\TipoMovimiento;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class TipoMovimientoUpdateRequest extends FormRequest
 {
@@ -14,7 +15,7 @@ class TipoMovimientoUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'nombre' => ['required', 'unique:tipo_movimientos,nombre', 'string', 'max:255'],
+            'nombre' => ['required', Rule::unique('tipo_movimientos', 'nombre')->ignore($this->route('tipoMovimiento')), 'string', 'max:255'],
         ];
     }
 }

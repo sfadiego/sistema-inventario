@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Ubicaciones;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UbicacionesUpdateRequest extends FormRequest
 {
@@ -22,7 +23,7 @@ class UbicacionesUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'nombre' => ['required', 'string', 'max:255', 'unique:ubicaciones,nombre'],
+            'nombre' => ['required', 'string', 'max:255', Rule::unique('ubicaciones', 'nombre')->ignore($this->route('ubicacion'))],
         ];
     }
 }

@@ -70,6 +70,9 @@ class Venta extends Model
 
     public function finalizarVenta(): Venta
     {
+        if ($this->status_venta === StatusVentaEnum::Finalizada->value) {
+            throw new \Exception('La venta ya está finalizada');
+        }
 
         DB::beginTransaction();
         collect($this->ventaProductos)

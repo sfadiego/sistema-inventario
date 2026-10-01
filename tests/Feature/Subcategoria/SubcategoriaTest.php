@@ -49,7 +49,7 @@ class SubcategoriaTest extends TestCase
 
         $this->withExceptionHandling();
 
-        $invalidId = $this->faker->randomNumber();
+        $invalidId = 999999999;
 
         $response = $this->getJson("/api/categorias/{$invalidId}/subcategorias");
 
@@ -98,7 +98,7 @@ class SubcategoriaTest extends TestCase
         $this->withExceptionHandling();
 
         $categoria = Categoria::factory()->create();
-        $subcategoria_invalid = fake()->unique()->randomNumber();
+        $subcategoria_invalid = 999999999;
 
         $response = $this->getJson("/api/categorias/{$categoria->id}/subcategorias/{$subcategoria_invalid}");
 

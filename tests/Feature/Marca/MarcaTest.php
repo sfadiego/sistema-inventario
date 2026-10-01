@@ -3,6 +3,7 @@
 namespace tests\Feature\Marca;
 
 use App\Models\Marca;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class MarcaTest extends TestCase
@@ -128,5 +129,23 @@ class MarcaTest extends TestCase
         $this->assertSoftDeleted('marcas', [
             'id' => $marca->id,
         ]);
+    }
+
+    public function test_update_marca_conservando_su_nombre(): void
+    {
+        $this->loginAdmin();
+        $registro = Marca::factory()->create(['nombre' => $this->faker->unique()->lexify('marca-?????')]);
+
+        $this->put("/api/marcas/{$registro->id}", ['nombre' => $registro->nombre])->assertStatus(200);
+    }
+
+    public function test_update_marca_con_nombre_de_otro_registro(): void
+    {
+        $this->loginAdmin();
+        $registro = Marca::factory()->create(['nombre' => $this->faker->unique()->lexify('marca-?????')]);
+        $otro = Marca::factory()->create(['nombre' => $this->faker->unique()->lexify('marca-?????')]);
+
+        $this->expectException(ValidationException::class);
+        $this->put("/api/marcas/{$registro->id}", ['nombre' => $otro->nombre]);
     }
 }

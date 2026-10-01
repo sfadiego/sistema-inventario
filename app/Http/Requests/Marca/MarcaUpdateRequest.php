@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Marca;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class MarcaUpdateRequest extends FormRequest
 {
@@ -14,7 +15,7 @@ class MarcaUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'nombre' => ['required', 'unique:marcas,nombre', 'string', 'max:255'],
+            'nombre' => ['required', Rule::unique('marcas', 'nombre')->ignore($this->route('marca')), 'string', 'max:255'],
         ];
     }
 

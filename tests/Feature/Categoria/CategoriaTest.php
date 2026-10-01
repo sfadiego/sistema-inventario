@@ -3,6 +3,7 @@
 namespace Tests\Feature\Categoria;
 
 use App\Models\Categoria;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class CategoriaTest extends TestCase
@@ -141,5 +142,23 @@ class CategoriaTest extends TestCase
             'message' => 'Categoría eliminada',
             'data' => false,
         ]);
+    }
+
+    public function test_update_categoria_conservando_su_nombre(): void
+    {
+        $this->loginAdmin();
+        $registro = Categoria::factory()->create(['nombre' => $this->faker->unique()->lexify('cat-?????')]);
+
+        $this->put("/api/categorias/{$registro->id}", ['nombre' => $registro->nombre])->assertStatus(200);
+    }
+
+    public function test_update_categoria_con_nombre_de_otro_registro(): void
+    {
+        $this->loginAdmin();
+        $registro = Categoria::factory()->create(['nombre' => $this->faker->unique()->lexify('cat-?????')]);
+        $otro = Categoria::factory()->create(['nombre' => $this->faker->unique()->lexify('cat-?????')]);
+
+        $this->expectException(ValidationException::class);
+        $this->put("/api/categorias/{$registro->id}", ['nombre' => $otro->nombre]);
     }
 }

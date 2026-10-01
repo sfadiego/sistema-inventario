@@ -4,10 +4,13 @@ namespace Tests\Feature\Venta;
 
 use App\Enums\StatusVentaEnum;
 use App\Enums\TipoCompraEnum;
+use App\Enums\TipoMovimientoEnum;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\HistorialAdeudo;
 use App\Models\Producto;
 use App\Models\Proveedor;
+use App\Models\ReporteMovimiento;
 use App\Models\Ubicacion;
 use App\Models\Venta;
 use App\Models\VentaProducto;
@@ -121,7 +124,7 @@ class VentaTest extends TestCase
     {
         $this->loginAdmin();
 
-        $venta = Venta::factory()->create();
+        $venta = Venta::factory()->create(['status_venta' => StatusVentaEnum::Activa->value]);
         $producto = Producto::factory()->create([
             'nombre' => $this->faker->word,
             'proveedor_id' => Proveedor::factory()->create()->id,
@@ -167,6 +170,109 @@ class VentaTest extends TestCase
             'status_venta' => StatusVentaEnum::Finalizada->value,
             'folio' => $venta->folio,
         ]);
+    }
+
+    /**
+     * Venta activa con un producto: 3 piezas a $10 (total $30) y stock de $stock.
+     *
+     * @return array{0: Venta, 1: Producto}
+     */
+    private function ventaActivaConProducto(array $venta = [], int $stock = 10, int $cantidad = 3): array
+    {
+        $venta = Venta::factory()->create(array_merge([
+            'status_venta' => StatusVentaEnum::Activa->value,
+            'tipo_compra' => TipoCompraEnum::Contado->value,
+        ], $venta));
+        $producto = Producto::factory()->create(['stock' => $stock]);
+        VentaProducto::factory()->create([
+            'venta_id' => $venta->id,
+            'producto_id' => $producto->id,
+            'cantidad' => $cantidad,
+            'precio' => 10,
+        ]);
+
+        return [$venta, $producto];
+    }
+
+    public function test_finalizar_venta_descuenta_stock_y_registra_movimiento(): void
+    {
+        $user = $this->loginAdmin();
+        [$venta, $producto] = $this->ventaActivaConProducto();
+
+        $this->put("/api/ventas/{$venta->id}/finalizar-venta")->assertStatus(200);
+
+        $this->assertEquals(7, $producto->fresh()->stock);
+        $this->assertEquals(30, $venta->fresh()->venta_total);
+        $this->assertDatabaseHas('reporte_movimientos', [
+            'producto_id' => $producto->id,
+            'tipo_movimiento_id' => TipoMovimientoEnum::SALIDA->value,
+            'cantidad' => 3,
+            'cantidad_anterior' => 10,
+            'cantidad_actual' => 7,
+            'user_id' => $user->id,
+        ]);
+    }
+
+    public function test_finalizar_venta_con_stock_insuficiente(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaActivaConProducto(stock: 2, cantidad: 3);
+
+        $response = $this->put("/api/ventas/{$venta->id}/finalizar-venta");
+
+        $response->assertStatus(422);
+        $this->assertEquals(2, $producto->fresh()->stock);
+        $this->assertEquals(StatusVentaEnum::Activa->value, $venta->fresh()->status_venta);
+    }
+
+    public function test_finalizar_venta_a_credito_registra_adeudo_del_cliente(): void
+    {
+        $this->loginAdmin();
+        $cliente = Cliente::factory()->create(['adeudo' => -100]);
+        [$venta] = $this->ventaActivaConProducto([
+            'cliente_id' => $cliente->id,
+            'tipo_compra' => TipoCompraEnum::Credito->value,
+        ]);
+
+        $this->put("/api/ventas/{$venta->id}/finalizar-venta")->assertStatus(200);
+
+        $this->assertEquals(-130, $cliente->fresh()->adeudo);
+        $this->assertDatabaseHas('historial_adeudo_cliente', [
+            'cliente_id' => $cliente->id,
+            'venta_id' => $venta->id,
+            'total_adeudo' => -30,
+        ]);
+    }
+
+    public function test_finalizar_venta_de_contado_no_modifica_adeudo(): void
+    {
+        $this->loginAdmin();
+        $cliente = Cliente::factory()->create(['adeudo' => -100]);
+        [$venta] = $this->ventaActivaConProducto(['cliente_id' => $cliente->id]);
+
+        $this->put("/api/ventas/{$venta->id}/finalizar-venta")->assertStatus(200);
+
+        $this->assertEquals(-100, $cliente->fresh()->adeudo);
+        $this->assertEquals(0, HistorialAdeudo::where('venta_id', $venta->id)->count());
+    }
+
+    public function test_finalizar_venta_dos_veces_no_duplica_stock_ni_adeudo(): void
+    {
+        $this->loginAdmin();
+        $cliente = Cliente::factory()->create(['adeudo' => 0]);
+        [$venta, $producto] = $this->ventaActivaConProducto([
+            'cliente_id' => $cliente->id,
+            'tipo_compra' => TipoCompraEnum::Credito->value,
+        ]);
+
+        $this->put("/api/ventas/{$venta->id}/finalizar-venta")->assertStatus(200);
+        $segunda = $this->put("/api/ventas/{$venta->id}/finalizar-venta");
+
+        $segunda->assertStatus(422);
+        $this->assertEquals(7, $producto->fresh()->stock);
+        $this->assertEquals(-30, $cliente->fresh()->adeudo);
+        $this->assertEquals(1, HistorialAdeudo::where('venta_id', $venta->id)->count());
+        $this->assertEquals(1, ReporteMovimiento::where('producto_id', $producto->id)->count());
     }
 
     public function test_duplicate_folio(): void

@@ -48,16 +48,16 @@ class DevolucionesController extends Controller
     public function store(DevolucionesStoreRequest $params, DevolucionAction $action): JsonResponse
     {
         try {
+            $venta = $action->validateSale($params->venta_id, $params->productos);
+            if (! $venta) {
+                return Response::error('No es una devolucion válida');
+            }
+
             $devolucion = Devoluciones::create([
                 'motivo' => $params->motivo,
                 'venta_id' => $params->venta_id,
                 'status' => StatusDevolucionEnum::CREADA->value,
             ]);
-
-            $venta = $action->validateSale($params->venta_id, $params->productos);
-            if (! $venta) {
-                return Response::error('No es una devolucion válida');
-            }
 
             $action->processProductsAndUpdateTotal($devolucion, $params->productos);
 

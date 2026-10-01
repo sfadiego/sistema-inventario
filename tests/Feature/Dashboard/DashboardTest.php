@@ -19,8 +19,7 @@ class DashboardTest extends TestCase
         ]);
 
         $ventas = Venta::where('status_venta', StatusVentaEnum::Finalizada)
-
-        ->whereHas('ventaProductos', fn ($q) => $q->withTrashed())
+            ->whereHas('ventaProductos', fn ($q) => $q->withTrashed())
             ->get();
 
         $expectedTotal = $ventas->sum('venta_total');
@@ -29,6 +28,28 @@ class DashboardTest extends TestCase
         $response->assertStatus(200);
 
         $this->assertEquals(round($expectedTotal, 2), round($response->json('data.total'), 2));
+    }
+
+    public function test_total_ventas_filtra_por_fecha_y_estatus(): void
+    {
+        $this->loginAdmin();
+        $inicioMes = now()->startOfMonth();
+        $filtro = $inicioMes->toDateString();
+        $params = fn () => $this->getJson('/api/dashboard/total-ventas?fecha='.$filtro)->assertStatus(200)->json('data.total');
+        $base = (float) $params();
+
+        $crear = fn (string $status, $fecha) => Venta::factory()->withProductos(1)->create([
+            'status_venta' => $status,
+            'created_at' => $fecha,
+        ]);
+
+        $dentro = $crear(StatusVentaEnum::Finalizada->value, $inicioMes->copy()->addMinute());
+        // mes anterior: fuera del rango
+        $crear(StatusVentaEnum::Finalizada->value, $inicioMes->copy()->subMinute());
+        // activa: no cuenta aunque sea de este mes
+        $crear(StatusVentaEnum::Activa->value, $inicioMes->copy()->addHour());
+
+        $this->assertEquals(round($base + (float) $dentro->venta_total, 2), round((float) $params(), 2));
     }
 
     public function test_mas_vendidos_por_categoria()
