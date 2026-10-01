@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Inventory management system for a motorcycle parts shop (refaccionaria). Laravel 12 API backend + React 19 + TypeScript SPA frontend, communicating via Axios with Sanctum token auth. **Not** an Inertia.js app despite the dependency (`@inertiajs/react` and `inertia-laravel` are unused leftovers) — the frontend is a standalone SPA served from `resources/views/app.blade.php`. Code, tables, routes and enums are in Spanish; keep that convention. Route prefixes are kebab-case (`venta-producto`, `reporte-movimientos`). The `@/` alias maps to `resources/js`.
+Inventory management system for a motorcycle parts shop (refaccionaria). Laravel 12 API backend + React 19 + TypeScript SPA frontend, communicating via Axios with Sanctum token auth. **Not** an Inertia.js app (those dependencies were removed) — the frontend is a standalone SPA served from `resources/views/app.blade.php`. Code, tables, routes and enums are in Spanish; keep that convention. Route prefixes are kebab-case (`venta-producto`, `reporte-movimientos`). The `@/` alias maps to `resources/js`.
 
 ## Commands
 
@@ -35,7 +35,7 @@ php artisan test --env=testing tests/Feature/Venta/VentaTest.php
 php artisan test --env=testing --filter=test_store_venta
 ```
 
-Tests are Pest/PHPUnit under `tests/Feature/{Module}` (no Feature tests yet for Devoluciones, Ubicacion or Users). Tests use `DatabaseTransactions` (not `RefreshDatabase`) and run `migrate:fresh && db:seed` once per test run via a static `$migrated` flag in `TestCase`. The `loginAdmin()` / `createUser(RoleEnum $role)` helpers in `TestCase` authenticate via `Sanctum::actingAs`.
+Tests are Pest/PHPUnit under `tests/Feature/{Module}` (no Feature tests yet for Devoluciones, Ubicacion or Users). Tests use `DatabaseTransactions` (not `RefreshDatabase`) and run `migrate:fresh && db:seed` once per test run: `TestCase::createApplication()` does it (guarded by a static `$migrated` flag) *before* `DatabaseTransactions` opens its transaction, so even the first test leaves no data behind. Don't move that into `setUp()`. The `loginAdmin()` / `createUser(RoleEnum $role)` helpers in `TestCase` authenticate via `Sanctum::actingAs`.
 
 ### Code Formatting
 
@@ -83,6 +83,8 @@ DB_HOST=mysql
 DB_PASSWORD=root
 ```
 
+**Frontend build in Docker.** The `node` service (`node:22-alpine`) runs `pnpm install --frozen-lockfile && pnpm run build` once and exits (status `exited 0` is normal). It keeps its own `node_modules` in the named volume `node_modules` (Linux binaries) so it never touches the host's `node_modules`, and sets `CI=true` so pnpm never waits on an interactive prompt. To rebuild after frontend changes: `docker compose up -d node` (or `pnpm run build` on the host). Output goes to `public/build` (git-ignored), served by nginx.
+
 **Database connection: Docker vs. host.** The database is the `laravel_mysql` container (`mysql:8.0`), data in the `mysql_data` volume. The same `.env` serves only one mode at a time:
 
 | Where the command runs | `DB_HOST` | `DB_PORT` |
@@ -121,11 +123,15 @@ Caveats: `php artisan test` runs `migrate:fresh && db:seed` once per run (see Te
 
 **Movimientos trait** — `app/Traits/Movimientos.php` must be used whenever stock changes. Call `$this->nuevoMovimiento([...])` with exactly these 7 keys: `producto_id`, `tipo_movimiento_id`, `motivo`, `cantidad`, `cantidad_anterior`, `cantidad_actual`, `user_id`. It only checks the key *count* and returns `false` silently on mismatch, so check the return value.
 
-**Middleware** — API routes run through `setHeaders`, `api`, `transaction` and `errorReporting` (see `bootstrap/app.php`). `TransactionMiddleware` wraps every non-GET request in a DB transaction (skipped in unit tests) and rolls back on an exception, a 500 response, or any JSON body with `status: "error"` (i.e. `Response::error()`), so a failed request leaves no partial writes in production. Don't open your own outer transaction in controllers. Because the middleware is skipped in tests, tests do NOT see that rollback. `ErrorReporting` persists errors to the `error_reportings` table (module `Logic/ErrorReporting`); the frontend also reports to Sentry via `instrument.js` (disabled when environment is `local`).
+**Middleware** — API routes run through `setHeaders`, `api`, `transaction` and `errorReporting` (see `bootstrap/app.php`). `TransactionMiddleware` wraps every non-GET request in a DB transaction (skipped in unit tests) and rolls back on an exception, a 500 response, or any JSON body with `status: "error"` (i.e. `Response::error()`), so a failed request leaves no partial writes in production. Don't open your own outer transaction in controllers. Because the middleware is skipped in tests, tests do NOT see that rollback. `ErrorReporting` persists errors to the `error_reportings` table (module `Logic/ErrorReporting`); the frontend also reports to Sentry via `instrument.js`; the DSN comes from `VITE_SENTRY_DSN` in `.env` (empty or `VITE_APP_ENV=local` disables it) and is baked in at build time.
 
 **Roles & authorization** — `RoleEnum`: Admin=1, User=2 (employee), SuperAdmin=3. Gates are in `AuthServiceProvider`: `can:admin` passes for Admin and SuperAdmin (e.g. `adeudos` routes); `can:user` compares `role_id` against the enum object rather than `->value`, so it likely never passes — verify before relying on it.
 
 **Domain model** — `Producto` (with `ImagenProducto`, `Categoria`/`Subcategoria`, `Marca`, `Proveedor`, `Ubicacion`) → `Venta` / `VentaProducto` (sales and line items) → `Devoluciones` / `DetalleDevolucion` (returns). `Cliente` has credit balances tracked in `HistorialAdeudo` (settled via `/api/adeudos`). Every stock change is logged in `ReporteMovimiento` with a `TipoMovimiento`.
+
+**Sales rules** — A `Venta` is created `activa` and moves to `finalizada` exactly once (`Venta::finalizarVenta()` throws if it is already finalized); stock, movements and customer credit (`HistorialAdeudo`) are applied at finalization. Admins/superadmins can create a sale with a past date by sending the optional `fecha` field on `POST /api/ventas` (stored as `created_at`, never in the future, employees get 403): dashboard/reports count it in that period, credit debt keeps the sale date, and the inventory movement keeps the *real* timestamp with the sale date in its `motivo`. Dashboard and reports filter by `created_at` (no `finalizada_at` column exists on purpose — avoid migrations on `venta`).
+
+**Returns rules** (`DevolucionAction::validateSale()`, validated before anything is created) — max `Devoluciones::MAX_POR_VENTA` (2) returns per sale, canceled ones included; only one non-canceled return per sale at a time; every product must belong to the sale and the summed quantity (duplicate lines are added up) cannot exceed what remains in `venta_producto`; quantities are decimal (`numeric|gt:0`, meters can be fractional).
 
 **Imports & downloads** — `app/Imports/ImportProducto.php` (Excel product import) and `ImageProductImport.php` (bulk images); routes `imports`, `images`, `descargables`, `pdf`, `barcode`.
 
@@ -157,7 +163,7 @@ Caveats: `php artisan test` runs `migrate:fresh && db:seed` once per run (see Te
 
 ## CI
 
-GitHub Actions on push/PR to `main`: `code_style.yml` runs `pnpm run format:check` and `./vendor/bin/pint --test`; `inventario_test.yml` runs `php artisan test --env=testing` (PHP 8.4, SQLite). Run `composer format` before pushing or CI will fail.
+GitHub Actions on push/PR to `main`: `code_style.yml` runs `pnpm run format:check` and `./vendor/bin/pint --test`; `inventario_test.yml` runs `php artisan test --env=testing` (PHP 8.4, SQLite). Run `composer format` before pushing or CI will fail. `pnpm run types` currently reports 0 errors; keep it that way.
 
 ## Environment
 

@@ -5,7 +5,7 @@ import { FormikProps } from 'formik';
 import { IFiltroProducto } from '../useProductosPage';
 
 interface IFiltrosProductoProps {
-  formik: FormikProps<IFiltroProducto>;
+  formik: FormikProps<IFiltroProducto & { nombre?: string }>;
 }
 export const FiltrosProductos = ({ formik }: IFiltrosProductoProps) => {
   return (

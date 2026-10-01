@@ -4,6 +4,7 @@ namespace Tests;
 
 use App\Enums\RoleEnum;
 use App\Models\User;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Foundation\Testing\WithFaker;
@@ -15,22 +16,30 @@ abstract class TestCase extends BaseTestCase
 
     public static bool $migrated = false;
 
+    /**
+     * La base se migra y siembra una sola vez por ejecución, al crear la primera aplicación
+     * y antes de que DatabaseTransactions abra su transacción: así ningún test (ni el primero)
+     * deja datos sin revertir.
+     */
+    public function createApplication()
+    {
+        $app = parent::createApplication();
+
+        if (! self::$migrated) {
+            self::$migrated = true;
+            $kernel = $app->make(Kernel::class);
+            $kernel->call('migrate:fresh');
+            $kernel->call('db:seed');
+        }
+
+        return $app;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
-        if (! self::$migrated) {
-            self::runFreshMigrations();
-            self::$migrated = true;
-        }
-        // ErrorContainer::resetErrors();
         $this->withoutVite();
         $this->withoutExceptionHandling();
-    }
-
-    public function runFreshMigrations(): void
-    {
-        $this->artisan('migrate:fresh');
-        $this->artisan('db:seed');
     }
 
     public function loginAdmin(): User

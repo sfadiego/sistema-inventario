@@ -15,7 +15,7 @@ export const FormAgregarImagen = ({ isOpen, closeModal, productId }: IModalAgreg
     <Modal title={`Producto`} subtitle={`Actualiza imagen de producto`} isOpen={isOpen} onClose={closeModal} className="m-4 max-w-[700px]">
       <div className={`grid grid-cols-12 gap-3`}>
         <div className="col-span-12">
-          <DropzoneComponent onSubmitFile={onSubmit} />
+          <DropzoneComponent onSubmitFile={(file) => onSubmit(Array.isArray(file) ? file[0] : file)} />
         </div>
       </div>
     </Modal>

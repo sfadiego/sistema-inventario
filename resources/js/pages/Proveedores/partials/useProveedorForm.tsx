@@ -20,7 +20,9 @@ export const useProveedorForm = (props: IUseProveedorFormProps) => {
   const initialValues: IProveedorFormik = {
     nombre: proveedor?.nombre ?? '',
     observaciones: proveedor?.observaciones ?? '',
-    categorias: (proveedor?.categorias ?? []).filter((c): c is ICategoria => typeof c === 'object' && c !== null).map((c: ICategoria) => c.id),
+    categorias: (proveedor?.categorias ?? [])
+      .filter((c: unknown): c is ICategoria => typeof c === 'object' && c !== null)
+      .map((c: ICategoria) => c.id),
   };
 
   const validationSchema = Yup.object().shape({

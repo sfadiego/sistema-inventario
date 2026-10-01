@@ -1,9 +1,10 @@
 import * as Sentry from '@sentry/react';
 
 const environment = import.meta.env.VITE_APP_ENV || '';
+// El DSN se define en .env (VITE_SENTRY_DSN). Sin DSN, o en entorno local, Sentry queda desactivado.
+const dsn = import.meta.env.VITE_SENTRY_DSN || '';
 Sentry.init({
-  dsn: environment !== 'local' ? 'https://70406f5e6365e3aaee9309956cefdfb2@o4510659108077568.ingest.us.sentry.io/4510659108929536' : '',
-  // dsn: 'https://70406f5e6365e3aaee9309956cefdfb2@o4510659108077568.ingest.us.sentry.io/4510659108929536',
+  dsn: environment !== 'local' ? dsn : '',
   // Setting this option to true will send default PII data to Sentry.
   // For example, automatic IP address collection on events
   sendDefaultPii: true,

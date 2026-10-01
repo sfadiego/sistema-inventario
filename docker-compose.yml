@@ -58,22 +58,26 @@ services:
       - laravel
 
   node:
-    image: node:19-alpine
+    image: node:22-alpine
     container_name: laravel_node
     env_file: .env
+    environment:
+      # evita preguntas interactivas de pnpm (el contenedor no tiene terminal)
+      CI: 'true'
     working_dir: /app
     volumes:
       - .:/app
+      # node_modules propio del contenedor (binarios linux): no toca el node_modules del host
+      - node_modules:/app/node_modules
       - /app/.pnpm-store
-    command: sh -c "npm install -g pnpm && pnpm install && pnpm run build" #instala dependencias
+    # usa la versión de pnpm fijada en package.json ("packageManager")
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm run build"
     networks:
       - laravel
-    depends_on:
-      mysql:
-        condition: service_healthy
 
 networks:
   laravel:
     driver: bridge
 volumes:
   mysql_data:
+  node_modules:

@@ -7,7 +7,7 @@ import Label from '../Label';
 import { useDatePicker } from './useDatepicker';
 
 interface DatePickerProps {
-  name: Extract<keyof T, string>;
+  name: string;
   formik?: FormikProps<any>;
   label?: string;
   disabled?: boolean;

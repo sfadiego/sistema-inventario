@@ -16,12 +16,11 @@ import { useServiceIndexProductos } from '@/Services/productos/useServiceProduct
 import { useServiceVentaProductoDetalle } from '@/Services/ventaProducto/useServiceVentaProducto';
 import { useServiceShowVenta } from '@/Services/ventas/useServiceVenta';
 import { useParams } from 'react-router';
+import { IFiltroProducto } from '../Productos/useProductosPage';
 import { useProductoVentaModal } from './useProductoVentaModal';
 
-export interface IFiltroProductoVenta {
+export interface IFiltroProductoVenta extends IFiltroProducto {
   nombre?: string;
-  proveedor_id?: number;
-  categoria_id?: number;
 }
 const FILTERS: IFilters<IFiltroProductoVenta>[] = [{ property: 'nombre', operator: 'like', initialValue: '' }];
 

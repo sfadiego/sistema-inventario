@@ -62,6 +62,7 @@ export const useDataTable = ({ service, payload = {}, renderersMap = {}, columnP
     data,
     isLoading,
     refetch,
-    dataTableProps: defaultDataTableProps,
+    // mantine-datatable declara las props como unión discriminada; se deja sin tipar para poder combinarlas con rowExpansion, etc.
+    dataTableProps: defaultDataTableProps as any,
   };
 };
