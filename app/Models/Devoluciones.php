@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Devoluciones extends Model
 {
+    /** Máximo de devoluciones (incluidas las canceladas) que admite una venta. */
+    public const MAX_POR_VENTA = 2;
+
     protected $table = 'devoluciones';
 
     protected $fillable = ['total_reembolsado', 'motivo', 'venta_id', 'status'];

@@ -24,25 +24,52 @@ class DevolucionAction
         $this->ventasAction = $ventasAction;
     }
 
+    /**
+     * Valida que cada producto esté en la venta y que, sumando las líneas repetidas,
+     * no se devuelva más de lo que queda registrado en la venta.
+     *
+     * @return Venta|null null si algún producto no pertenece a la venta
+     *
+     * @throws \Exception si la venta ya alcanzó el máximo de devoluciones, tiene una activa o se pide devolver más de lo vendido
+     */
     public function validateSale(int $ventaId, array $productos): ?Venta
     {
-        $productIds = collect($productos)
-            ->pluck('producto_id')
-            ->toArray();
+        if (Devoluciones::where('venta_id', $ventaId)->count() >= Devoluciones::MAX_POR_VENTA) {
+            throw new \Exception('La venta ya alcanzó el máximo de '.Devoluciones::MAX_POR_VENTA.' devoluciones');
+        }
+
+        $hayDevolucionActiva = Devoluciones::where('venta_id', $ventaId)
+            ->where('status', '!=', StatusDevolucionEnum::CANCELADA->value)
+            ->exists();
+        if ($hayDevolucionActiva) {
+            throw new \Exception('La venta ya tiene una devolución activa, cancélala antes de generar otra');
+        }
+
+        $solicitado = collect($productos)
+            ->groupBy('producto_id')
+            ->map(fn ($lineas) => $lineas->sum('cantidad'));
 
         $venta = Venta::where('id', $ventaId)
-            ->with('ventaProductos', function ($q) use ($productIds) {
-                $q->whereIn('producto_id', $productIds);
+            ->with('ventaProductos', function ($q) use ($solicitado) {
+                $q->whereIn('producto_id', $solicitado->keys());
             })
             ->first();
 
-        if ($venta->ventaProductos->count() === 0) {
-            Log::info('devolucion: No se encontraron productos en la venta', [
-                'venta_id' => $ventaId,
-                'product_ids' => $productIds,
-            ]);
+        foreach ($solicitado as $productoId => $cantidad) {
+            $ventaProducto = $venta->ventaProductos->firstWhere('producto_id', $productoId);
 
-            return null;
+            if (! $ventaProducto) {
+                Log::info('devolucion: El producto no se encuentra en la venta', [
+                    'venta_id' => $ventaId,
+                    'producto_id' => $productoId,
+                ]);
+
+                return null;
+            }
+
+            if (round($cantidad, 2) > round($ventaProducto->cantidad, 2)) {
+                throw new \Exception('La cantidad a devolver es mayor que la cantidad vendida');
+            }
         }
 
         return $venta;

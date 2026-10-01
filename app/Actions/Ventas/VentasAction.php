@@ -7,17 +7,18 @@ use App\Models\VentaProducto;
 
 class VentasAction
 {
-    public function updateVentaProductoDevolucion(VentaProducto $ventaProducto, int $cantidad): void
+    public function updateVentaProductoDevolucion(VentaProducto $ventaProducto, int|float $cantidad): void
     {
-        if ($ventaProducto->cantidad - $cantidad < 0) {
+        $restante = round($ventaProducto->cantidad - $cantidad, 2);
+
+        if ($restante < 0) {
             throw new \Exception('La cantidad a devolver es mayor que la cantidad vendida');
         }
 
-        if ($ventaProducto->cantidad - $cantidad == 0) {
+        if ($restante == 0) {
             $ventaProducto->delete();
         } else {
-
-            $ventaProducto->cantidad = $ventaProducto->cantidad - $cantidad;
+            $ventaProducto->cantidad = $restante;
             $ventaProducto->save();
         }
     }

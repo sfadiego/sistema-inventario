@@ -16,10 +16,16 @@ use App\Models\Venta;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PermisosTest extends TestCase
 {
+    private function nombreUnico(): string
+    {
+        return 'permisos-'.Str::random(12);
+    }
+
     private function adeudo(): HistorialAdeudo
     {
         return HistorialAdeudo::create([
@@ -37,9 +43,9 @@ class PermisosTest extends TestCase
     private function rutasSoloAdmin(): array
     {
         return [
-            ['delete', '/api/categorias/'.Categoria::factory()->create()->id],
+            ['delete', '/api/categorias/'.Categoria::factory()->create(['nombre' => $this->nombreUnico()])->id],
             ['delete', '/api/clientes/'.Cliente::factory()->create()->id],
-            ['delete', '/api/marcas/'.Marca::factory()->create()->id],
+            ['delete', '/api/marcas/'.Marca::factory()->create(['nombre' => $this->nombreUnico()])->id],
             ['post', '/api/productos'],
             ['post', '/api/productos/'.Producto::factory()->create()->id],
             ['delete', '/api/productos/'.Producto::factory()->create()->id],
@@ -48,8 +54,8 @@ class PermisosTest extends TestCase
             ['delete', '/api/reporte-movimientos/'.ReporteMovimiento::factory()->create()->id],
             ['post', '/api/tipo-movimientos'],
             ['post', '/api/ubicaciones'],
-            ['put', '/api/ubicaciones/'.Ubicacion::factory()->create()->id],
-            ['delete', '/api/ubicaciones/'.Ubicacion::factory()->create()->id],
+            ['put', '/api/ubicaciones/'.Ubicacion::factory()->create(['nombre' => $this->nombreUnico()])->id],
+            ['delete', '/api/ubicaciones/'.Ubicacion::factory()->create(['nombre' => $this->nombreUnico()])->id],
             ['post', '/api/users'],
             ['put', '/api/users/'.User::factory()->create()->id],
             ['delete', '/api/users/'.User::factory()->create()->id],

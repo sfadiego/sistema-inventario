@@ -6,9 +6,9 @@ use App\Models\Producto;
 
 class ProductosAction
 {
-    public function updateStock(Producto $producto, int $quantity, string $action = '+'): void
+    public function updateStock(Producto $producto, int|float $quantity, string $action = '+'): void
     {
         $increase = $action === '+';
-        $producto->update(['stock' => $producto->stock + ($increase ? $quantity : -$quantity)]);
+        $producto->update(['stock' => round($producto->stock + ($increase ? $quantity : -$quantity), 2)]);
     }
 }

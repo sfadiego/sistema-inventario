@@ -1,3 +1,4 @@
+import { ProductoUnidadEnum } from '@/enums/ProductoUnidadEnum';
 import { IDevolucionProducto } from '@/models/devolucion';
 import { IVentaProducto } from '@/models/ventaProducto.interface';
 import { useCallback, useEffect, useState } from 'react';
@@ -30,12 +31,22 @@ export const useDetailProductoDevolucion = ({ producto, addProduct, validateExis
     setMsgValidacion('');
   }, [producto]);
 
+  const cantidadMaxima = Number(producto?.cantidad ?? 0);
+  const unidadMetro = selected.unidad === ProductoUnidadEnum.Metro;
+
   const handleAgregar = useCallback(() => {
     const { cantidad, precio_unitario } = selected;
-    const cantidadMaxima = producto?.cantidad ?? 0;
 
-    if (cantidad <= 0) {
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
       return setMsgValidacion('La cantidad debe ser mayor a 0');
+    }
+
+    if (!unidadMetro && !Number.isInteger(cantidad)) {
+      return setMsgValidacion('Esta unidad solo admite cantidades enteras');
+    }
+
+    if (unidadMetro && Math.abs(cantidad * 100 - Math.round(cantidad * 100)) > 1e-6) {
+      return setMsgValidacion('Máximo 2 decimales');
     }
 
     if (cantidad > cantidadMaxima) {
@@ -52,7 +63,7 @@ export const useDetailProductoDevolucion = ({ producto, addProduct, validateExis
 
     setMsgValidacion('');
     addProduct({ ...selected });
-  }, [selected, producto, validateExist, addProduct]);
+  }, [selected, cantidadMaxima, unidadMetro, validateExist, addProduct]);
 
   const handleChange = (field: keyof IDevolucionProducto, value: string | number) => {
     setMsgValidacion('');
@@ -64,6 +75,8 @@ export const useDetailProductoDevolucion = ({ producto, addProduct, validateExis
 
   return {
     selected,
+    cantidadMaxima,
+    unidadMetro,
     msgValidacion,
     setMsgValidacion,
     handleChange,

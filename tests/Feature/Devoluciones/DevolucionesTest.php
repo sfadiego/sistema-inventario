@@ -36,7 +36,7 @@ class DevolucionesTest extends TestCase
         return [$venta, $producto];
     }
 
-    private function payload(Venta $venta, Producto $producto, int $cantidad, float $precio = 10): array
+    private function payload(Venta $venta, Producto $producto, int|float $cantidad, float $precio = 10): array
     {
         return [
             'venta_id' => $venta->id,
@@ -102,6 +102,166 @@ class DevolucionesTest extends TestCase
         $response->assertStatus(422);
         $this->assertEquals(10, $producto->fresh()->stock);
         $this->assertEquals(5, $venta->ventaProductos()->first()->cantidad);
+        $this->assertDatabaseMissing('devoluciones', ['venta_id' => $venta->id]);
+    }
+
+    public function test_store_devolucion_con_otra_activa_en_la_misma_venta(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaConProducto();
+        $this->postJson('/api/devoluciones', $this->payload($venta, $producto, 2))->assertStatus(200);
+
+        $response = $this->postJson('/api/devoluciones', $this->payload($venta, $producto, 1));
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('activa', $response->json('message'));
+        $this->assertEquals(1, Devoluciones::where('venta_id', $venta->id)->count());
+        $this->assertEquals(12, $producto->fresh()->stock);
+    }
+
+    public function test_store_devolucion_despues_de_cancelar_la_anterior(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaConProducto();
+        $payload = $this->payload($venta, $producto, 2);
+        $primera = $this->postJson('/api/devoluciones', $payload)->json('data.id');
+        $this->putJson("/api/devoluciones/{$primera}", $payload)->assertStatus(200);
+
+        $this->postJson('/api/devoluciones', $payload)->assertStatus(200);
+
+        $this->assertEquals(2, Devoluciones::where('venta_id', $venta->id)->count());
+        $this->assertEquals(12, $producto->fresh()->stock);
+    }
+
+    public function test_store_devolucion_con_producto_repetido_suma_las_cantidades(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaConProducto();
+        $payload = $this->payload($venta, $producto, 3);
+        $payload['productos'][] = $payload['productos'][0];
+
+        $response = $this->postJson('/api/devoluciones', $payload);
+
+        $response->assertStatus(422);
+        $this->assertEquals(10, $producto->fresh()->stock);
+        $this->assertDatabaseMissing('devoluciones', ['venta_id' => $venta->id]);
+    }
+
+    public function test_store_devolucion_con_varios_productos_no_procesa_ninguno_si_uno_excede(): void
+    {
+        $this->loginAdmin();
+        [$venta, $primero] = $this->ventaConProducto();
+        $segundo = Producto::factory()->create(['stock' => 10]);
+        VentaProducto::factory()->create([
+            'venta_id' => $venta->id,
+            'producto_id' => $segundo->id,
+            'cantidad' => 1,
+            'precio' => 10,
+        ]);
+        $payload = $this->payload($venta, $primero, 2);
+        $payload['productos'][] = ['producto_id' => $segundo->id, 'cantidad' => 2, 'precio_unitario' => 10];
+
+        $response = $this->postJson('/api/devoluciones', $payload);
+
+        $response->assertStatus(422);
+        $this->assertEquals(10, $primero->fresh()->stock);
+        $this->assertEquals(10, $segundo->fresh()->stock);
+        $this->assertDatabaseMissing('devoluciones', ['venta_id' => $venta->id]);
+    }
+
+    public function test_store_devolucion_con_un_producto_ajeno_a_la_venta_en_la_lista(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaConProducto();
+        $ajeno = Producto::factory()->create(['stock' => 10]);
+        $payload = $this->payload($venta, $producto, 1);
+        $payload['productos'][] = ['producto_id' => $ajeno->id, 'cantidad' => 1, 'precio_unitario' => 10];
+
+        $this->postJson('/api/devoluciones', $payload)->assertStatus(422);
+
+        $this->assertEquals(10, $producto->fresh()->stock);
+        $this->assertDatabaseMissing('devoluciones', ['venta_id' => $venta->id]);
+    }
+
+    public function test_store_devolucion_de_producto_en_metros_acepta_decimales(): void
+    {
+        $this->loginAdmin();
+        $producto = Producto::factory()->create(['stock' => 10, 'unidad' => 'metro']);
+        $venta = Venta::factory()->create(['status_venta' => StatusVentaEnum::Finalizada->value]);
+        VentaProducto::factory()->create([
+            'venta_id' => $venta->id,
+            'producto_id' => $producto->id,
+            'cantidad' => 2.5,
+            'precio' => 10,
+        ]);
+
+        $this->postJson('/api/devoluciones', $this->payload($venta, $producto, 1.5))->assertStatus(200);
+
+        $this->assertEquals(11.5, (float) $producto->fresh()->stock);
+        $this->assertEquals(1.0, (float) $venta->ventaProductos()->first()->cantidad);
+
+        // quedan 1.0 m: pedir 1.01 excede
+        $this->postJson('/api/devoluciones', $this->payload($venta, $producto, 1.01))->assertStatus(422);
+        $this->assertEquals(11.5, (float) $producto->fresh()->stock);
+    }
+
+    public function test_store_devolucion_respeta_el_maximo_de_devoluciones_por_venta(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaConProducto();
+        $payload = $this->payload($venta, $producto, 1);
+        // dos devoluciones creadas y canceladas agotan el máximo
+        foreach (range(1, Devoluciones::MAX_POR_VENTA) as $i) {
+            $id = $this->postJson('/api/devoluciones', $payload)->assertStatus(200)->json('data.id');
+            $this->putJson("/api/devoluciones/{$id}", $payload)->assertStatus(200);
+        }
+
+        $response = $this->postJson('/api/devoluciones', $payload);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('máximo', $response->json('message'));
+        $this->assertEquals(Devoluciones::MAX_POR_VENTA, Devoluciones::where('venta_id', $venta->id)->count());
+        $this->assertEquals(10, $producto->fresh()->stock);
+    }
+
+    public function test_las_devoluciones_canceladas_cuentan_para_el_maximo(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaConProducto();
+        $payload = $this->payload($venta, $producto, 1);
+        $primera = $this->postJson('/api/devoluciones', $payload)->json('data.id');
+        $this->putJson("/api/devoluciones/{$primera}", $payload)->assertStatus(200);
+        $this->postJson('/api/devoluciones', $payload)->assertStatus(200);
+
+        $this->postJson('/api/devoluciones', $payload)->assertStatus(422);
+        $this->assertEquals(2, Devoluciones::where('venta_id', $venta->id)->count());
+    }
+
+    public function test_las_reglas_de_devolucion_son_por_venta(): void
+    {
+        $this->loginAdmin();
+        [$ventaA, $productoA] = $this->ventaConProducto();
+        [$ventaB, $productoB] = $this->ventaConProducto();
+        $this->postJson('/api/devoluciones', $this->payload($ventaA, $productoA, 1))->assertStatus(200);
+
+        // la devolución activa de la venta A no bloquea a la venta B
+        $this->postJson('/api/devoluciones', $this->payload($ventaB, $productoB, 1))->assertStatus(200);
+    }
+
+    public function test_store_devolucion_rechaza_cantidades_cero_o_negativas(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaConProducto();
+
+        foreach ([0, -2] as $cantidad) {
+            try {
+                $this->postJson('/api/devoluciones', $this->payload($venta, $producto, $cantidad));
+                $this->fail("Se aceptó la cantidad {$cantidad}");
+            } catch (ValidationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        $this->assertEquals(10, $producto->fresh()->stock);
     }
 
     public function test_store_devolucion_de_producto_que_no_esta_en_la_venta(): void

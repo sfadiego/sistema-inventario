@@ -26,7 +26,7 @@ class DevolucionesStoreRequest extends FormRequest
             'motivo' => 'required|string',
             'productos' => 'required|array|min:1',
             'productos.*.producto_id' => 'required|exists:productos,id',
-            'productos.*.cantidad' => 'required|numeric',
+            'productos.*.cantidad' => 'required|numeric|gt:0',
             'productos.*.precio_unitario' => 'required|numeric|min:0',
         ];
     }

@@ -2,7 +2,6 @@ import SingleInputField from '@/components/form/input/SingleInputField';
 import Label from '@/components/form/Label';
 import Badge from '@/components/ui/badge/Badge';
 import Button from '@/components/ui/button/Button';
-import { ProductoUnidadEnum } from '@/enums/ProductoUnidadEnum';
 import { IDevolucionProducto } from '@/models/devolucion';
 import { PlusCircle } from 'lucide-react';
 import { useDetailProductoDevolucion } from './useDetailProductoDevolucion';
@@ -14,8 +13,11 @@ interface IDetailProductoDevolucion {
   validateExist: (producto: IDevolucionProducto) => boolean;
 }
 export const DetailProductoDevolucion = ({ producto, hasDevolucion, addProduct, validateExist }: IDetailProductoDevolucion) => {
-  const { msgValidacion, selected, handleAgregar, handleChange } = useDetailProductoDevolucion({ producto, addProduct, validateExist });
-  const unidadMetro = producto?.producto.unidad == ProductoUnidadEnum.Metro;
+  const { msgValidacion, selected, cantidadMaxima, unidadMetro, handleAgregar, handleChange } = useDetailProductoDevolucion({
+    producto,
+    addProduct,
+    validateExist,
+  });
   return (
     <div className="grid grid-cols-12 gap-3 p-4">
       <div className="col-span-12">
@@ -41,11 +43,14 @@ export const DetailProductoDevolucion = ({ producto, hasDevolucion, addProduct, 
         <SingleInputField name="ventaId" type="hidden" />
       </div>
       <div className="col-span-6">
-        <Label>Cantidad </Label>
+        <Label>{`Cantidad (máx. ${cantidadMaxima})`}</Label>
         <SingleInputField
           type="number"
+          min={unidadMetro ? '0.01' : '1'}
+          max={String(cantidadMaxima)}
+          step={unidadMetro ? 0.01 : 1}
           disabled={hasDevolucion}
-          onChange={(e) => handleChange('cantidad', e.target.value ? (unidadMetro ? parseFloat(e.target.value) : parseInt(e.target.value)) : 0)}
+          onChange={(e) => handleChange('cantidad', e.target.value ? parseFloat(e.target.value) : 0)}
           value={selected.cantidad}
           name="cantidad"
         />
