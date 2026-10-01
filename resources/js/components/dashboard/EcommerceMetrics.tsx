@@ -7,7 +7,9 @@ import { ArrowDown, ArrowUp, Cog, HandCoins } from 'lucide-react';
 import { DashboardSingleCard } from './SingleCard/DashboardSingleCard';
 
 export default function EcommerceMetrics() {
-  const date = new Date().toISOString().slice(0, 7) + '-01';
+  // Primer día del mes en hora local (toISOString usa UTC y a fin de mes ya marcaría el mes siguiente)
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
   const { isLoading: isLoadingTotal, data: dataTotal } = useServiceDashboardTotalVentas({ fecha: date });
   const { isLoading: isLoadingMasVendido, data: dataMasVendido } = useServiceDashboardMasVendidos();
   const { isLoading: isLoadingMenosVendido, data: dataMenosVendido } = useServiceDashboardMenosVendidos();

@@ -63,3 +63,7 @@ php artisan cache:clear
 
 # 6. Enlace de storage
 php artisan storage:link --force || true
+
+# 7. Los comandos artisan corren como root y crean archivos (ej. laravel.log) que php-fpm (www-data) no puede escribir
+chown -R www-data:www-data storage bootstrap/cache
+chmod -R ug+rwX storage bootstrap/cache

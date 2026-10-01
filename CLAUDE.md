@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Inventory management system for a motorcycle parts shop (refaccionaria). Laravel 12 API backend + React 19 + TypeScript SPA frontend, communicating via Axios with Sanctum token auth. **Not** an Inertia.js app despite the dependency — the frontend is a standalone SPA served from `resources/views/app.blade.php`.
+Inventory management system for a motorcycle parts shop (refaccionaria). Laravel 12 API backend + React 19 + TypeScript SPA frontend, communicating via Axios with Sanctum token auth. **Not** an Inertia.js app despite the dependency (`@inertiajs/react` and `inertia-laravel` are unused leftovers) — the frontend is a standalone SPA served from `resources/views/app.blade.php`. Code, tables, routes and enums are in Spanish; keep that convention. Route prefixes are kebab-case (`venta-producto`, `reporte-movimientos`). The `@/` alias maps to `resources/js`.
 
 ## Commands
 
@@ -12,6 +12,7 @@ Inventory management system for a motorcycle parts shop (refaccionaria). Laravel
 
 ```bash
 # Run everything (Laravel server + queue + pail logger + Vite)
+# Note: the script uses `npx`/`npm run dev` internally (exception to the pnpm rule)
 composer dev
 
 # Frontend only
@@ -34,7 +35,7 @@ php artisan test --env=testing tests/Feature/Venta/VentaTest.php
 php artisan test --env=testing --filter=test_store_venta
 ```
 
-Tests use `DatabaseTransactions` (not `RefreshDatabase`) and run `migrate:fresh && db:seed` once per test run via a static `$migrated` flag in `TestCase`. The `loginAdmin()` / `createUser(RoleEnum $role)` helpers in `TestCase` authenticate via `Sanctum::actingAs`.
+Tests are Pest/PHPUnit under `tests/Feature/{Module}` (no Feature tests yet for Devoluciones, Ubicacion or Users). Tests use `DatabaseTransactions` (not `RefreshDatabase`) and run `migrate:fresh && db:seed` once per test run via a static `$migrated` flag in `TestCase`. The `loginAdmin()` / `createUser(RoleEnum $role)` helpers in `TestCase` authenticate via `Sanctum::actingAs`.
 
 ### Code Formatting
 
@@ -82,6 +83,26 @@ DB_HOST=mysql
 DB_PASSWORD=root
 ```
 
+**Database connection: Docker vs. host.** The database is the `laravel_mysql` container (`mysql:8.0`), data in the `mysql_data` volume. The same `.env` serves only one mode at a time:
+
+| Where the command runs | `DB_HOST` | `DB_PORT` |
+|---|---|---|
+| Inside Docker (php/node containers) | `mysql` | `3306` |
+| On the host (local `php artisan`, TablePlus, DBeaver) | `127.0.0.1` | `3307` (published port) |
+
+After changing `.env`, recreate the containers (`docker compose up -d --force-recreate php web`); `docker restart` does not re-read it.
+
+## Destructive Operations — Explicit Permission Required
+
+Never run any of the following unless the user explicitly orders that specific action in the current conversation. A general request (e.g. "fix the error", "set up the project", "run the tests") is NOT permission:
+
+- Refreshing/wiping the database: `migrate:fresh`, `migrate:refresh`, `migrate:reset`, `db:wipe`, `db:seed` against a database with data, dropping tables, `TRUNCATE`, or bulk `DELETE`/`UPDATE` SQL.
+- `docker compose down --volumes` / `docker volume rm` (destroys `mysql_data`), or `docker system prune`.
+- Deleting or overwriting backups in `storage/app/backups/` or `.env` files.
+- Git history rewrites or discards: `git reset --hard`, `git checkout -- .`, `git clean`, force push.
+
+Caveats: `php artisan test` runs `migrate:fresh && db:seed` once per run (see Testing). It must only run with `--env=testing` (SQLite in `/tmp/testing.sqlite`), never against the dev MySQL; check `.env.testing` first. If an operation is needed to solve a problem, propose it and wait for confirmation. Before any approved destructive step, offer `php artisan db:backup` first.
+
 ## Architecture
 
 ### Backend (Laravel 12)
@@ -98,7 +119,17 @@ DB_PASSWORD=root
 
 **Actions** — `app/Actions/` contains single-action classes for complex operations (e.g. sale processing, product adjustments, returns).
 
-**Movimientos trait** — `app/Traits/Movimientos.php` must be used whenever stock changes. Call `$this->nuevoMovimiento([...])` with the required 7 keys to log every inventory movement to `reporte_movimientos`.
+**Movimientos trait** — `app/Traits/Movimientos.php` must be used whenever stock changes. Call `$this->nuevoMovimiento([...])` with exactly these 7 keys: `producto_id`, `tipo_movimiento_id`, `motivo`, `cantidad`, `cantidad_anterior`, `cantidad_actual`, `user_id`. It only checks the key *count* and returns `false` silently on mismatch, so check the return value.
+
+**Middleware** — API routes run through `setHeaders`, `api`, `transaction` and `errorReporting` (see `bootstrap/app.php`). `TransactionMiddleware` wraps every non-GET request in a DB transaction (skipped in unit tests) and rolls back on a 500 response, so don't open your own outer transaction in controllers. `ErrorReporting` persists errors to the `error_reportings` table (module `Logic/ErrorReporting`); the frontend also reports to Sentry via `instrument.js` (disabled when environment is `local`).
+
+**Roles & authorization** — `RoleEnum`: Admin=1, User=2 (employee), SuperAdmin=3. Gates are in `AuthServiceProvider`: `can:admin` passes for Admin and SuperAdmin (e.g. `adeudos` routes); `can:user` compares `role_id` against the enum object rather than `->value`, so it likely never passes — verify before relying on it.
+
+**Domain model** — `Producto` (with `ImagenProducto`, `Categoria`/`Subcategoria`, `Marca`, `Proveedor`, `Ubicacion`) → `Venta` / `VentaProducto` (sales and line items) → `Devoluciones` / `DetalleDevolucion` (returns). `Cliente` has credit balances tracked in `HistorialAdeudo` (settled via `/api/adeudos`). Every stock change is logged in `ReporteMovimiento` with a `TipoMovimiento`.
+
+**Imports & downloads** — `app/Imports/ImportProducto.php` (Excel product import) and `ImageProductImport.php` (bulk images); routes `imports`, `images`, `descargables`, `pdf`, `barcode`.
+
+**Adding a module** — (1) `routes/modules/{x}.php` + register a prefix in `routes/api.php`, (2) Controller + FormRequest(s), (3) `app/Logic/{X}/` extending `IndexLogic`/`ShowLogic` (from `app/Core/Logic`), (4) Model/migration/seeder, (5) feature test in `tests/Feature/{X}`, (6) frontend: `Services/{x}/`, `router/modules/`, `pages/{X}/`, enums in `resources/js/enums` mirroring the PHP ones. Add a request to `bruno/inventario` (API collection) as well.
 
 **Printer module** — `app/Printer/` is a self-contained ESC/POS ticket printing subsystem with interfaces for connector (CUPS/network/OS) and formatter. Configured via `PRINTER_NAME`, `PRINTER_DRIVER`, and `PRINTER_HOST` env vars.
 
@@ -124,6 +155,14 @@ DB_PASSWORD=root
 
 **Package manager** — `pnpm` (v10). Do not use `npm` or `yarn`.
 
+## CI
+
+GitHub Actions on push/PR to `main`: `code_style.yml` runs `pnpm run format:check` and `./vendor/bin/pint --test`; `inventario_test.yml` runs `php artisan test --env=testing` (PHP 8.4, SQLite). Run `composer format` before pushing or CI will fail.
+
+## Environment
+
+Besides the usual Laravel vars (`.env.example`): `DB_CONNECTION=mysql`, `QUEUE_CONNECTION=database`, `SESSION_DRIVER=database`, `APP_DUMP_PATH` (path to `mysqldump` for `db:backup`, `/usr/bin` in Docker), `WHATSSAPP_CONTACTO` (sic — spelled this way in code), `APP_FULL_NAME`, plus the `PRINTER_*` vars. Other folders: `bruno/` (API collection), `docker/` (mysql, nginx, php configs), `TODO-inventario.txt` (informal product notes/backlog).
+
 ## Default Users (dev/seeded)
 
 | Role       | Email                      | Password   |
@@ -131,6 +170,8 @@ DB_PASSWORD=root
 | superadmin | superadmin@repamotos.com   | password   |
 | admin      | admin@repamotos.com        | password   |
 | employee   | empleado@repamotos.com     | password   |
+
+Dev/seed credentials only — never use them in production.
 
 ## Printer Setup (CUPS)
 
