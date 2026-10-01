@@ -35,7 +35,9 @@ export const FormVenta = ({ isOpen, closeModal }: IFormVentaProps) => {
     isValidClient,
     adeudo,
     confiable,
+    puedeElegirFecha,
   } = useFormVenta();
+  const mostrarFecha = puedeElegirFecha && !ventaActual?.id;
 
   return (
     <Modal isOpen={isOpen} title={title} onClose={closeModal} className="m-4 max-w-[700px]">
@@ -64,9 +66,14 @@ export const FormVenta = ({ isOpen, closeModal }: IFormVentaProps) => {
                   onChange={() => toggleClient(formik)}
                 />
               </div>
-              <div className="col-span-12">
+              <div className={mostrarFecha ? 'col-span-8' : 'col-span-12'}>
                 <Input<IVenta> disabled={true} label={`Folio`} name="folio" formik={formik} type={InputTypeEnum.Text} />
               </div>
+              {mostrarFecha && (
+                <div className="col-span-4">
+                  <Input<IVenta> label="Fecha" name="fecha" formik={formik} type={InputTypeEnum.Date} />
+                </div>
+              )}
               <div className="col-span-12">
                 <Input<IVenta> disabled={disabled} label={`Nombre de Venta`} name="nombre_venta" formik={formik} type={InputTypeEnum.Text} />
               </div>

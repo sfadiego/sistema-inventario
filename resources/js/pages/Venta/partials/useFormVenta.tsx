@@ -1,5 +1,7 @@
 import { IOptions } from '@/components/form/select/interfaces/IOptions';
+import { RolesEnum } from '@/enums/RolesEnum';
 import { StatusVentaEnum } from '@/enums/StatusVentaEnum';
+import { useAxios } from '@/hooks/useAxios';
 import { useOnSubmit } from '@/hooks/useOnSubmit';
 import { ICliente } from '@/models/cliente.interface';
 import { IVenta } from '@/models/venta.interface';
@@ -12,6 +14,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { MultiValue, SingleValue } from 'react-select';
 import * as Yup from 'yup';
+
+/** Fecha local de hoy (YYYY-MM-DD); toISOString usaría UTC */
+const hoy = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
 
 const validationSchema = Yup.object().shape({
   venta_total: Yup.number(),
@@ -28,10 +36,15 @@ const validationSchema = Yup.object().shape({
   status_venta: Yup.string()
     .oneOf([StatusVentaEnum.ACTIVA, StatusVentaEnum.FINALIZADA], 'Estatus de compra inválido')
     .required('El estatus de compra es obligatorio'),
+  fecha: Yup.string()
+    .nullable()
+    .test('no-futura', 'La fecha no puede ser futura', (value) => !value || value <= hoy()),
 });
 
 export const useFormVenta = () => {
   const navigate = useNavigate();
+  const { user } = useAxios();
+  const puedeElegirFecha = [RolesEnum.ADMIN, RolesEnum.SUPERADMIN].includes(user?.role_id ?? 0);
   const { getItem, setItem, clearItem } = useSelectedItemStore();
 
   const venta = getItem('venta') as IVenta;
@@ -79,6 +92,7 @@ export const useFormVenta = () => {
     cliente_id: clienteId,
     tipo_compra: venta?.tipo_compra ?? TipoVentaEnum.CONTADO,
     status_venta: venta?.status_venta ?? StatusVentaEnum.ACTIVA,
+    fecha: '',
   };
 
   const mutator = useServiceStoreVenta();
@@ -131,6 +145,7 @@ export const useFormVenta = () => {
     title: venta?.id ? `Venta: ${venta.folio}` : 'Crear Venta',
     total: venta?.venta_total ?? null,
     disabled: !!venta?.id,
+    puedeElegirFecha,
     resetVenta,
     esNuevocliente,
     toggleClient,

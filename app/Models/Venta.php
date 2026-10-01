@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class Venta extends Model
@@ -58,7 +59,7 @@ class Venta extends Model
 
     public static function createVenta(array $data): Venta
     {
-        return self::create([
+        $venta = new self([
             'venta_total' => $data['venta_total'] ?? 0,
             'nombre_venta' => $data['nombre_venta'] ?? '',
             'folio' => self::createFolio(),
@@ -66,6 +67,17 @@ class Venta extends Model
             'tipo_compra' => $data['tipo_compra'] ?? TipoCompraEnum::Contado->value,
             'status_venta' => StatusVentaEnum::Activa->value,
         ]);
+
+        // Venta registrada con retraso: created_at es la fecha en que ocurrió la venta
+        if (! empty($data['fecha'])) {
+            $fecha = Carbon::parse($data['fecha']);
+            $venta->created_at = $fecha;
+            $venta->updated_at = $fecha;
+        }
+
+        $venta->save();
+
+        return $venta;
     }
 
     public function finalizarVenta(): Venta
@@ -97,7 +109,7 @@ class Venta extends Model
                 $this->nuevoMovimiento([
                     'producto_id' => $producto->id,
                     'tipo_movimiento_id' => TipoMovimientoEnum::SALIDA->value,
-                    'motivo' => 'Venta de producto',
+                    'motivo' => $this->motivoSalida(),
                     'cantidad' => $cantidadDescontar,
                     'cantidad_anterior' => $stockOriginal,
                     'cantidad_actual' => $stockActual,
@@ -114,12 +126,14 @@ class Venta extends Model
             $cliente->adeudo = $adeudoTotal;
             $cliente->update();
 
-            HistorialAdeudo::create([
+            $adeudo = new HistorialAdeudo([
                 'cliente_id' => $this->cliente_id,
                 'venta_id' => $this->id,
                 'total_adeudo' => (-$ventaTotal),
-                'created_at' => now(),
             ]);
+            // el adeudo queda con la fecha de la venta (created_at no es asignable en masa)
+            $adeudo->created_at = $this->created_at;
+            $adeudo->save();
         }
 
         $this->update([
@@ -130,6 +144,19 @@ class Venta extends Model
         DB::commit();
 
         return $this->refresh();
+    }
+
+    /**
+     * El movimiento de inventario se registra con la fecha real del cambio de stock;
+     * si la venta es de otro día, el motivo conserva la fecha en que ocurrió.
+     */
+    private function motivoSalida(): string
+    {
+        if ($this->created_at->isSameDay(now())) {
+            return 'Venta de producto';
+        }
+
+        return 'Venta de producto (venta del '.$this->created_at->format('d/m/Y').')';
     }
 
     public function scopeVentaTotal(): float

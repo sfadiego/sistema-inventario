@@ -15,6 +15,8 @@ export interface IVenta {
   devolucion?: IDevolucion;
   devoluciones?: IDevolucion[];
   created_at?: string;
+  /** Solo al crear: fecha en que ocurrió la venta (administradores) */
+  fecha?: string;
 }
 
 export interface IVentaUpdateProps {

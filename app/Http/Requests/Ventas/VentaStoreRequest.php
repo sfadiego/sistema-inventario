@@ -19,6 +19,8 @@ class VentaStoreRequest extends FormRequest
             'cliente_id' => ['nullable', 'required_if:tipo_compra,credito', 'exists:clientes,id'],
             'tipo_compra' => ['nullable', 'in:contado,credito'],
             'status_venta' => ['required', 'in:activa,finalizada'],
+            // venta registrada con retraso (solo administradores); no puede ser futura
+            'fecha' => ['nullable', 'date', 'before_or_equal:now'],
         ];
     }
 }

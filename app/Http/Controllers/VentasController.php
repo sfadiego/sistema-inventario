@@ -12,6 +12,7 @@ use App\Logic\Ventas\VentasIndexLogic;
 use App\Models\Venta;
 use App\Traits\Movimientos;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Response;
 
 class VentasController extends Controller
@@ -27,6 +28,10 @@ class VentasController extends Controller
     {
         if ($params->tipo_compra === TipoCompraEnum::Credito->value && empty($params->cliente_id)) {
             return Response::error('Cliente es requerido para ventas de crédito');
+        }
+
+        if ($params->filled('fecha') && ! Gate::forUser($params->user())->allows('admin')) {
+            return Response::unauthorized();
         }
 
         $venta = Venta::createVenta($params->all());

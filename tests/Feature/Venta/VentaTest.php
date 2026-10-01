@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Venta;
 
+use App\Enums\RoleEnum;
 use App\Enums\StatusVentaEnum;
 use App\Enums\TipoCompraEnum;
 use App\Enums\TipoMovimientoEnum;
@@ -14,6 +15,8 @@ use App\Models\ReporteMovimiento;
 use App\Models\Ubicacion;
 use App\Models\Venta;
 use App\Models\VentaProducto;
+use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class VentaTest extends TestCase
@@ -273,6 +276,125 @@ class VentaTest extends TestCase
         $this->assertEquals(-30, $cliente->fresh()->adeudo);
         $this->assertEquals(1, HistorialAdeudo::where('venta_id', $venta->id)->count());
         $this->assertEquals(1, ReporteMovimiento::where('producto_id', $producto->id)->count());
+    }
+
+    private function payloadVenta(array $override = []): array
+    {
+        return array_merge([
+            'nombre_venta' => 'Venta de prueba',
+            'tipo_compra' => TipoCompraEnum::Contado->value,
+            'status_venta' => StatusVentaEnum::Activa->value,
+        ], $override);
+    }
+
+    public function test_admin_crea_venta_con_fecha_pasada(): void
+    {
+        $this->loginAdmin();
+        $fecha = now()->subDays(10)->startOfDay()->addHours(15);
+
+        $response = $this->postJson('/api/ventas', $this->payloadVenta(['fecha' => $fecha->toDateTimeString()]));
+
+        $response->assertStatus(200);
+        $venta = Venta::findOrFail($response->json('data.id'));
+        $this->assertTrue($venta->created_at->equalTo($fecha));
+        $this->assertEquals(StatusVentaEnum::Activa->value, $venta->status_venta);
+    }
+
+    public function test_venta_con_fecha_pasada_cuenta_en_el_periodo_de_esa_fecha(): void
+    {
+        $this->loginAdmin();
+        $fecha = now()->subMonths(2)->startOfMonth()->addDays(3);
+        $desde = $fecha->copy()->startOfMonth()->toDateString();
+        $total = fn () => (float) $this->getJson('/api/dashboard/total-ventas?fecha='.$desde)->json('data.total');
+        $base = $total();
+
+        $id = $this->postJson('/api/ventas', $this->payloadVenta(['fecha' => $fecha->toDateString()]))->json('data.id');
+        $producto = Producto::factory()->create(['stock' => 10]);
+        VentaProducto::factory()->create(['venta_id' => $id, 'producto_id' => $producto->id, 'cantidad' => 2, 'precio' => 50]);
+        $this->put("/api/ventas/{$id}/finalizar-venta")->assertStatus(200);
+
+        $this->assertEquals($base + 100, $total());
+        // la venta no se suma al mes actual
+        $this->assertTrue(Venta::findOrFail($id)->created_at->lt(now()->startOfMonth()));
+    }
+
+    public function test_empleado_no_puede_crear_venta_con_fecha_pasada(): void
+    {
+        $this->createUser(RoleEnum::User);
+        $antes = Venta::count();
+
+        $response = $this->postJson('/api/ventas', $this->payloadVenta(['fecha' => now()->subDay()->toDateString()]));
+
+        $response->assertStatus(403);
+        $this->assertEquals($antes, Venta::count());
+    }
+
+    public function test_empleado_crea_venta_normal_con_fecha_actual(): void
+    {
+        $this->createUser(RoleEnum::User);
+
+        $response = $this->postJson('/api/ventas', $this->payloadVenta());
+
+        $response->assertStatus(200);
+        $venta = Venta::findOrFail($response->json('data.id'));
+        $this->assertTrue($venta->created_at->isSameDay(now()));
+    }
+
+    public function test_no_se_permite_venta_con_fecha_futura(): void
+    {
+        $this->loginAdmin();
+
+        $this->expectException(ValidationException::class);
+        $this->postJson('/api/ventas', $this->payloadVenta(['fecha' => now()->addDay()->toDateString()]));
+    }
+
+    public function test_finalizar_venta_con_fecha_pasada_descuenta_stock_hoy_y_conserva_la_fecha_en_el_motivo(): void
+    {
+        $this->loginAdmin();
+        $fecha = now()->subDays(5)->startOfDay()->addHours(12);
+        $venta = Venta::findOrFail($this->postJson('/api/ventas', $this->payloadVenta(['fecha' => $fecha->toDateTimeString()]))->json('data.id'));
+        $producto = Producto::factory()->create(['stock' => 10]);
+        VentaProducto::factory()->create(['venta_id' => $venta->id, 'producto_id' => $producto->id, 'cantidad' => 3, 'precio' => 10]);
+
+        $this->put("/api/ventas/{$venta->id}/finalizar-venta")->assertStatus(200);
+
+        $this->assertEquals(7, $producto->fresh()->stock);
+        $movimiento = ReporteMovimiento::where('producto_id', $producto->id)->firstOrFail();
+        // el movimiento queda con la fecha real del cambio de stock...
+        $this->assertTrue(Carbon::parse($movimiento->created_at)->isSameDay(now()));
+        // ...y el motivo conserva la fecha de la venta
+        $this->assertStringContainsString($fecha->format('d/m/Y'), $movimiento->motivo);
+        $this->assertTrue($venta->fresh()->created_at->equalTo($fecha));
+    }
+
+    public function test_finalizar_venta_de_hoy_conserva_el_motivo_normal(): void
+    {
+        $this->loginAdmin();
+        [$venta, $producto] = $this->ventaActivaConProducto(['created_at' => now()]);
+
+        $this->put("/api/ventas/{$venta->id}/finalizar-venta")->assertStatus(200);
+
+        $this->assertEquals('Venta de producto', ReporteMovimiento::where('producto_id', $producto->id)->value('motivo'));
+    }
+
+    public function test_venta_a_credito_con_fecha_pasada_registra_el_adeudo_con_esa_fecha(): void
+    {
+        $this->loginAdmin();
+        $cliente = Cliente::factory()->create(['adeudo' => 0]);
+        $fecha = now()->subDays(7)->startOfDay()->addHours(9);
+        $venta = Venta::findOrFail($this->postJson('/api/ventas', $this->payloadVenta([
+            'tipo_compra' => TipoCompraEnum::Credito->value,
+            'cliente_id' => $cliente->id,
+            'fecha' => $fecha->toDateTimeString(),
+        ]))->json('data.id'));
+        $producto = Producto::factory()->create(['stock' => 10]);
+        VentaProducto::factory()->create(['venta_id' => $venta->id, 'producto_id' => $producto->id, 'cantidad' => 1, 'precio' => 40]);
+
+        $this->put("/api/ventas/{$venta->id}/finalizar-venta")->assertStatus(200);
+
+        $this->assertEquals(-40, $cliente->fresh()->adeudo);
+        $historial = HistorialAdeudo::where('venta_id', $venta->id)->firstOrFail();
+        $this->assertTrue($historial->created_at->equalTo($fecha));
     }
 
     public function test_duplicate_folio(): void
